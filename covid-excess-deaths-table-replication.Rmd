@@ -1,0 +1,325 @@
+---
+title: "Economist Table Recreation"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r}
+library(reactable)
+library(htmltools)
+library(lubridate)
+library(hrbrthemes)
+library(tidyverse)
+library(rlang)
+library(reactable)
+library(htmltools)
+library(lubridate)
+library(hrbrthemes)
+```
+
+```{css}
+.table {
+  margin: 0 auto;
+  width: 675px;
+}
+
+.followers-tbl {
+  font-size: 14px;
+  line-height: 18px;
+}
+
+.followers-tbl a {
+  color: inherit;
+}
+
+.title {
+  margin: 6px 0;
+  font-size: 16px;
+  font-family: 'Econ Sans Cnd'
+}
+
+.title h2 {
+  font-size: 16px;
+  font-weight: bold;
+  font-family: 'Econ Sans Cnd'
+}
+
+.title p {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.bar-cell {
+  display: flex;
+  align-items: center;
+}
+
+.number {
+  font-size: 13.5px;
+  white-space: pre;
+}
+
+.bar-chart {
+  flex-grow: 1;
+  margin-left: 6px;
+  height: 14px;
+}
+
+.bar {
+  height: 100%;
+}
+```
+
+```{r}
+create_dataframe <- function(country) {
+  country <- str_replace(country, " ", "_")
+  
+  data <-
+    readr::read_csv(
+      paste0(
+        'https://raw.githubusercontent.com/TheEconomist/covid-19-excess-deaths-tracker/master/output-data/excess-deaths/',
+        country,
+        '_excess_deaths.csv'
+      )
+    )
+  
+  data <- data %>%
+    select(
+      country,
+      region,
+      start_date,
+      end_date,
+      population,
+      total_deaths,
+      covid_deaths,
+      expected_deaths,
+      excess_deaths,
+      non_covid_deaths
+    )
+  
+  assign(country, rbind(data), envir = .GlobalEnv)
+}
+
+country_names <-
+  readr::read_csv(
+    'https://raw.githubusercontent.com/TheEconomist/covid-19-excess-deaths-tracker/master/source-data/list_of_sources.csv'
+  ) %>%
+  select(country) %>%
+  distinct() %>%
+  mutate(country = stringr::str_to_lower(country)) %>%
+  filter(country != 'all') %>%
+  pull()
+
+for (country in country_names) {
+  create_dataframe(country)
+}
+
+dfs = sapply(.GlobalEnv, is.data.frame)
+
+data <- do.call(rbind, mget(names(dfs)[dfs]))
+```
+
+```{r}
+good_countries <-
+  c("Britain",
+    "Spain",
+    "Italy",
+    "France",
+    "Netherlands",
+    "Belgium",
+    "Sweden",
+    "Austria")
+
+good_regions <- c("New York City", "Istanbul", "Jakarta")
+
+data_filtered_countries <- data %>%
+  filter(country %in% good_countries) %>%
+  filter(country == region)
+
+data_filtered_regions <- data %>%
+  filter(region %in% good_regions) %>%
+  # replace for the sake of the table
+  mutate(country = region)
+
+data_filtered <-
+  rbind(data_filtered_countries, data_filtered_regions)
+
+#### Remove excess deaths before the 50th COVID case (per table title)
+data_filtered <- data_filtered %>%
+  group_by(country) %>%
+  mutate(csum = cumsum(covid_deaths))
+```
+
+```{r}
+## https://stackoverflow.com/questions/40039903/r-add-th-rd-and-nd-to-dates
+append_date_suffix <- function(dates) {
+  suff <- case_when(
+    dates %in% c(11, 12, 13) ~ "th",
+    dates %% 10 == 1 ~ 'st',
+    dates %% 10 == 2 ~ 'nd',
+    dates %% 10 == 3 ~ 'rd',
+    TRUE ~ "th"
+  )
+  paste0(dates, suff)
+}
+
+dates_data <-
+  data_filtered %>%
+  # only looking at date ranges starting post-50 deaths
+  filter(csum > 50) %>%
+  group_by(country) %>%
+  summarise(start_date = min(start_date),
+            end_date = max(end_date)) %>%
+  mutate(
+    clean_start_day = format(start_date, "%d"),
+    clean_start_day = append_date_suffix(as.numeric(clean_start_day)),
+    clean_start_month = format(start_date, "%b"),
+    clean_end_day = format(end_date, "%d"),
+    clean_end_day = append_date_suffix(as.numeric(clean_end_day)),
+    clean_end_month = format(end_date, "%b")
+  ) %>%
+  mutate(
+    clean_range = paste0(
+      clean_start_month,
+      " ",
+      clean_start_day,
+      "-",
+      clean_end_month,
+      " ",
+      clean_end_day
+    )
+  ) %>%
+  select(country, clean_range)
+```
+
+```{r}
+data_for_table <- data_filtered %>%
+  filter(excess_deaths > 0) %>%
+  group_by(country) %>%
+  summarise(
+    excess_deaths = round(sum(excess_deaths)),
+    covid_deaths = round(sum(covid_deaths)),
+    perc = covid_deaths / excess_deaths
+  ) %>%
+  left_join(dates_data, by = 'country') %>%
+  select(country, clean_range, covid_deaths, excess_deaths, perc)
+```
+
+```{r}
+table <- reactable(
+  data_for_table,
+  defaultSortOrder = 'desc',
+  defaultSorted = 'excess_deaths',
+  showSortIcon = FALSE,
+  compact = TRUE,
+  defaultColDef = colDef(
+    headerStyle = list(
+      fontSize = "11px",
+      lineHeight = "14px",
+      textTransform = "uppercase",
+      color = "#0c0c0c",
+      fontWeight = "500",
+      borderBottom = "2px solid #e9edf0",
+      paddingBottom = "3px",
+      verticalAlign = "bottom",
+      fontFamily = font_es
+    ),
+    style = list(
+      fontFamily = font_es,
+      fontSize = "14px",
+      verticalAlign = "center",
+      align = "left"
+    )
+  ),
+  
+  columns = list(
+    country = colDef(
+      name = "Region / Country",
+      style = list(fontFamily = font_es,
+                   fontWeight = "400")
+    ),
+    covid_deaths = colDef(
+      name = "COVID-19 Deaths",
+      # align = "left",
+      cell = function(value) {
+        width <- paste0(value * 100 / max(data_for_table$covid_deaths), "%")
+        value <- format(value, big.mark = ",")
+        # value <- str_pad(value, 6, pad = "")
+        value <- format(value, width = 10, justify = "right")
+        bar <- div(
+          class = "bar-chart",
+          style = list(marginRight = "6px"),
+          div(
+            class = "bar",
+            style = list(width = width, backgroundColor = "#F15A3F")
+          )
+        )
+        div(class = "bar-cell", span(class = "number", value), bar)
+      }
+    ),
+    excess_deaths = colDef(
+      name = "Total Excess Deaths",
+      # align = "left",
+      cell = function(value) {
+        width <-
+          paste0(value * 100 / max(data_for_table$excess_deaths), "%")
+        value <- format(value, big.mark = ",")
+        value <- format(value, width = 10, justify = "right")
+        bar <- div(
+          class = "bar-chart",
+          style = list(marginRight = "6px"),
+          div(
+            class = "bar",
+            style = list(width = width, backgroundColor = "#3F5661")
+          )
+        )
+        div(class = "bar-cell", span(class = "number", value), bar)
+      }
+    ),
+    perc = colDef(
+      html = TRUE,
+      header = JS("
+      function(colInfo) {
+        return 'COVID-19 as<br>% of total'
+      }"),
+      name = "COVID-19 as % of Total",
+      align = "right",
+      maxWidth = 100,
+      format = colFormat(percent = TRUE, digits = 0),
+      style = list(fontFamily =  font_es_bold)
+    ),
+    clean_range = colDef(
+      name = "Time Period",
+      style = list(
+        color = '#3f5661',
+        fontSize = '12px',
+        fontFamily = font_es
+      )
+    )
+  ),
+)
+
+div(class = "table",
+    div(
+      class = "title",
+      h2("Excess mortality since region/country’s first 50 covid deaths"),
+      p(
+        paste0(
+          "Updated on ",
+          format(Sys.Date(),
+                 "%B "),
+          append_date_suffix(as.numeric(format(Sys.Date(
+            
+          ), "%d"))),
+          " ",
+          strftime(Sys.time(), format = "%H:%M"),
+          " UCT"
+        )
+      ),
+    ),
+    table)
+```
+
