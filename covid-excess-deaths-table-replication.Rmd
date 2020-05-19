@@ -213,6 +213,7 @@ table <- reactable(
   data_for_table,
   defaultSortOrder = 'desc',
   defaultSorted = 'excess_deaths',
+  pagination = FALSE,
   showSortIcon = FALSE,
   compact = TRUE,
   defaultColDef = colDef(
