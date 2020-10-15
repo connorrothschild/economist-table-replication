@@ -1,4 +1,5 @@
 ---
+title: "Recreating a Table by The Economist Using Reactable"
 date: "2020-05-18"
 category: R
 tags: [r, visualization, interactive]
@@ -93,7 +94,10 @@ Then, we loop!
 
 ```{r}
 for (country in country_names) {
-  create_dataframe(country)
+  tryCatch({create_dataframe(country)},
+           error = function(e) {
+             return(NULL)
+           })
 }
 ```
 
